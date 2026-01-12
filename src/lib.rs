@@ -43,7 +43,7 @@ impl<T> SparseMap<T> {
 
     /// Similar to [`Self::insert()`] but provides a [`Key`] before
     /// inserting the value.
-    fn insert_with_key<F>(&mut self, create: F) -> Key
+    pub fn insert_with_key<F>(&mut self, create: F) -> Key
     where
         F: FnOnce(&mut Self, Key) -> T,
     {
