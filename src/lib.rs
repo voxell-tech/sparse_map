@@ -21,7 +21,8 @@ use alloc::vec::Vec;
 /// - Keys are invalidated once their value is removed.
 #[derive(Debug)]
 pub struct SparseMap<T> {
-    buffer: Vec<Item<T>>,
+    buffer: Vec<Option<T>>,
+    generations: Vec<u32>,
     empty_slots: Vec<usize>,
 }
 
@@ -37,56 +38,37 @@ impl<T> SparseMap<T> {
     /// its generation counter is incremented to invalidate old keys.
     #[must_use = "The returned key is the only way to reference back the inserted value!"]
     pub fn insert(&mut self, value: T) -> Key {
-        self.alloc_slot(
-            value,
-            |value, item| item.replace(value),
-            |value| Item::new(value),
-        )
+        self.insert_with_key(|_, _| value)
     }
 
     /// Similar to [`Self::insert()`] but provides a [`Key`] before
     /// inserting the value.
-    pub fn insert_with_key<F>(&mut self, f: F) -> Key
+    fn insert_with_key<F>(&mut self, create: F) -> Key
     where
         F: FnOnce(&mut Self, Key) -> T,
     {
-        let key = self.alloc_slot(
-            (),
-            |_, item| item.replace_empty(),
-            |_| Item::new_empty(),
-        );
-
-        let value = f(self, key);
-        self.buffer[key.index].inner = Some(value);
-
-        key
-    }
-
-    /// Returns [`Key`], reusing a vacant slot or allocating a new one.
-    /// The caller decides how the slot is initialized.
-    ///
-    /// `value`: The inner value to be inserted.
-    /// `replace`: Determine how a vacant slot will be replaced.
-    /// `create`: Determine how a new item will be created.
-    fn alloc_slot<V, R, C>(
-        &mut self,
-        value: V,
-        replace: R,
-        create: C,
-    ) -> Key
-    where
-        R: FnOnce(V, &mut Item<T>) -> u32,
-        C: FnOnce(V) -> Item<T>,
-    {
         if let Some(index) = self.empty_slots.pop() {
-            let generation = replace(value, &mut self.buffer[index]);
-            Key::new(index, generation)
+            // Increment the generation counter.
+            let mut generation = self.generations[index];
+            generation = generation.wrapping_add(1);
+            self.generations[index] = generation;
+
+            let key = Key::new(index, generation);
+
+            let item = create(self, key);
+            self.buffer[index] = Some(item);
+
+            key
         } else {
             let index = self.buffer.len();
-            let item = create(value);
-            let generation = item.generation;
-            self.buffer.push(item);
-            Key::new(index, generation)
+            self.generations.insert(index, 0);
+
+            let key = Key::new(index, 0);
+
+            let item = create(self, key);
+            self.buffer.insert(index, Some(item));
+
+            key
         }
     }
 
@@ -104,8 +86,9 @@ impl<T> SparseMap<T> {
     /// key if present.
     pub fn get(&self, key: &Key) -> Option<&T> {
         let item = self.buffer.get(key.index)?;
-        if item.generation == key.generation {
-            return item.inner.as_ref();
+        let generation = self.generations.get(key.index)?;
+        if *generation == key.generation {
+            return item.as_ref();
         }
 
         None
@@ -115,8 +98,9 @@ impl<T> SparseMap<T> {
     /// if present.
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut T> {
         let item = self.buffer.get_mut(key.index)?;
-        if item.generation == key.generation {
-            return item.inner.as_mut();
+        let generation = self.generations.get(key.index)?;
+        if *generation == key.generation {
+            return item.as_mut();
         }
 
         None
@@ -163,16 +147,19 @@ impl<T> SparseMap<T> {
         // SAFETY: We already checked that the key contains a value.
         let mut value = self.buffer[key.index].take().unwrap();
         let result = f(self, &mut value);
-        self.buffer[key.index].inner = Some(value);
+        self.buffer[key.index] = Some(value);
 
         Some(result)
     }
 
     /// Returns `true` if the key currently refers to a live value.
     pub fn contains(&self, key: &Key) -> bool {
-        self.buffer.get(key.index).is_some_and(|item| {
-            item.inner.is_some() && item.generation == key.generation
-        })
+        self.buffer
+            .get(key.index)
+            .zip(self.generations.get(key.index))
+            .is_some_and(|(item, generation)| {
+                item.is_some() && *generation == key.generation
+            })
     }
 
     /// Returns the number of live values stored in the map.
@@ -192,6 +179,7 @@ impl<T> Default for SparseMap<T> {
     fn default() -> Self {
         Self {
             buffer: Vec::new(),
+            generations: Vec::new(),
             empty_slots: Vec::new(),
         }
     }
@@ -241,68 +229,6 @@ impl Display for Key {
     }
 }
 
-/// A generational slot used internally by [`SparseMap`].
-///
-/// Each `Item` represents a single indexable slot that may or may not
-/// contain a value. The `generation` counter is incremented whenever
-/// the slot’s occupancy changes, invalidating any previously issued
-/// [`Key`] referring to this index.
-///
-/// # Invariants
-///
-/// - `inner.is_some()`: the slot is live.
-/// - `inner.is_none()`: the slot is vacant and reusable.
-/// - `generation` is monotonically increasing (wrapping on overflow).
-#[derive(Debug)]
-struct Item<T> {
-    /// Stored value for this slot, if any.
-    inner: Option<T>,
-    /// Generation counter for stale-key detection.
-    generation: u32,
-}
-
-impl<T> Item<T> {
-    /// Creates a new occupied slot with generation `0`.
-    const fn new(value: T) -> Self {
-        Self {
-            inner: Some(value),
-            generation: 0,
-        }
-    }
-
-    /// Creates a new vacant slot with generation `0`.
-    const fn new_empty() -> Self {
-        Self {
-            inner: None,
-            generation: 0,
-        }
-    }
-
-    /// Takes the value out of the slot without modifying its
-    /// generation.
-    const fn take(&mut self) -> Option<T> {
-        self.inner.take()
-    }
-
-    /// Replaces the slot’s value and increments its generation.
-    ///
-    /// Returns the new generation.
-    fn replace(&mut self, value: T) -> u32 {
-        self.inner.replace(value);
-        self.generation = self.generation.wrapping_add(1);
-        self.generation
-    }
-
-    /// Empties the slot and increments its generation.
-    ///
-    /// Returns the new generation.
-    fn replace_empty(&mut self) -> u32 {
-        self.inner = None;
-        self.generation = self.generation.wrapping_add(1);
-        self.generation
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,21 +244,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_with_key_receives_valid_key_before_insert() {
-        let mut map = SparseMap::new();
-
-        let key = map.insert_with_key(|map, key| {
-            // Key must already be valid and point to the slot.
-            assert_eq!(key.index, 0);
-            assert!(map.buffer[key.index].inner.is_none());
-
-            42
-        });
-
-        assert_eq!(map.get(&key), Some(&42));
-    }
-
-    #[test]
     fn insert_and_insert_with_key_behave_equivalently() {
         let mut map = SparseMap::new();
 
@@ -342,8 +253,8 @@ mod tests {
         assert_eq!(k1.index, 0);
         assert_eq!(k2.index, 1);
 
-        assert_eq!(map.buffer[k1.index].inner, Some(1));
-        assert_eq!(map.buffer[k2.index].inner, Some(2));
+        assert_eq!(map.buffer[k1.index], Some(1));
+        assert_eq!(map.buffer[k2.index], Some(2));
     }
 
     #[test]
