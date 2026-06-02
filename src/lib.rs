@@ -77,9 +77,64 @@ impl<T> SparseMap<T> {
     /// Returns `None` if the key is invalid or already removed.
     /// The slot is marked for reuse.
     pub fn remove(&mut self, key: &Key) -> Option<T> {
+        let generation = self.generations.get(key.index)?;
+        if *generation != key.generation {
+            return None;
+        }
         let item = self.buffer.get_mut(key.index)?;
+        if item.is_none() {
+            return None;
+        }
         self.empty_slots.push(key.index);
         item.take()
+    }
+
+    /// Temporarily removes the value at `key` without freeing the
+    /// slot.
+    ///
+    /// The slot stays reserved at its current generation so the key
+    /// remains valid. Call [`Self::restore`] to put the value back.
+    ///
+    /// # Warning
+    ///
+    /// Not calling [`Self::restore`] after `take` leaks the slot:
+    /// the index is never returned to the free list, so it cannot
+    /// be reused.
+    ///
+    /// Returns `None` if the key does not refer to a live value.
+    pub fn take(&mut self, key: &Key) -> Option<T> {
+        let generation = self.generations.get(key.index)?;
+        if *generation != key.generation {
+            return None;
+        }
+        self.buffer.get_mut(key.index)?.take()
+    }
+
+    /// Puts a value back into the slot identified by `key`.
+    ///
+    /// This is the counterpart to [`Self::take`]. Returns
+    /// `false` if the slot is already occupied or the key is
+    /// no longer valid.
+    pub fn restore(&mut self, key: &Key, value: T) -> bool {
+        // Check if generation matches.
+        let Some(&generation) = self.generations.get(key.index)
+        else {
+            return false;
+        };
+        if generation != key.generation {
+            return false;
+        }
+
+        // Check if slot exists and is `None`.
+        let Some(slot) = self.buffer.get_mut(key.index) else {
+            return false;
+        };
+        if slot.is_some() {
+            return false;
+        }
+
+        *slot = Some(value);
+        true
     }
 
     /// Returns an immutable reference to the value for the given
@@ -207,6 +262,12 @@ pub struct Key {
 }
 
 impl Key {
+    /// A sentinel key that will never refer to a live value.
+    pub const PLACEHOLDER: Self = Self {
+        index: usize::MAX,
+        generation: u32::MAX,
+    };
+
     fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
