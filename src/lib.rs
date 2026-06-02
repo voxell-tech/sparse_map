@@ -391,4 +391,118 @@ mod tests {
         assert_eq!(map.get_mut(&fake_key), None);
         assert!(!map.contains(&fake_key));
     }
+
+    #[test]
+    fn take_returns_value() {
+        let mut map = SparseMap::new();
+        let key = map.insert(42);
+
+        assert_eq!(map.take(&key), Some(42));
+    }
+
+    #[test]
+    fn take_makes_slot_empty_but_key_generation_preserved() {
+        let mut map = SparseMap::new();
+        let key = map.insert(42);
+
+        map.take(&key);
+
+        // Slot is empty so get/contains return nothing.
+        assert_eq!(map.get(&key), None);
+        assert!(!map.contains(&key));
+        // Generation is intact so restore can use the same key.
+        assert_eq!(map.generations[key.index], key.generation);
+    }
+
+    #[test]
+    fn take_does_not_free_slot_for_reuse() {
+        let mut map = SparseMap::new();
+        let key = map.insert(1);
+        map.take(&key);
+
+        // Inserting a new value must go to a fresh slot, not key's slot.
+        let key2 = map.insert(2);
+        assert_ne!(key.index, key2.index);
+    }
+
+    #[test]
+    fn take_invalid_key_returns_none() {
+        let mut map = SparseMap::<i32>::new();
+        let fake_key = Key::new(999, 0);
+        assert_eq!(map.take(&fake_key), None);
+    }
+
+    #[test]
+    fn take_already_taken_returns_none() {
+        let mut map = SparseMap::new();
+        let key = map.insert(7);
+
+        assert_eq!(map.take(&key), Some(7));
+        assert_eq!(map.take(&key), None);
+    }
+
+    #[test]
+    fn restore_puts_value_back() {
+        let mut map = SparseMap::new();
+        let key = map.insert(10);
+
+        map.take(&key);
+        assert!(map.restore(&key, 10));
+
+        assert_eq!(map.get(&key), Some(&10));
+        assert!(map.contains(&key));
+    }
+
+    #[test]
+    fn restore_fails_if_slot_occupied() {
+        let mut map = SparseMap::new();
+        let key = map.insert(5);
+
+        // Slot is occupied, restore should fail.
+        assert!(!map.restore(&key, 99));
+        // Original value is untouched.
+        assert_eq!(map.get(&key), Some(&5));
+    }
+
+    #[test]
+    fn restore_fails_on_stale_key() {
+        let mut map = SparseMap::new();
+        let k1 = map.insert(1);
+        map.remove(&k1);
+        let _k2 = map.insert(2); // bumps generation on same slot
+
+        // k1 is stale, restore must reject it.
+        assert!(!map.restore(&k1, 99));
+    }
+
+    #[test]
+    fn restore_fails_on_invalid_index() {
+        let mut map = SparseMap::<i32>::new();
+        let fake_key = Key::new(999, 0);
+        assert!(!map.restore(&fake_key, 42));
+    }
+
+    #[test]
+    fn take_restore_roundtrip_key_stays_valid() {
+        let mut map = SparseMap::new();
+        let key = map.insert(100);
+
+        map.take(&key);
+        assert!(map.restore(&key, 200));
+        assert_eq!(map.get(&key), Some(&200));
+    }
+
+    #[test]
+    fn take_restore_allows_map_mutation_in_between() {
+        let mut map = SparseMap::new();
+        let key = map.insert(1);
+
+        let value = map.take(&key).unwrap();
+        // Insert and remove other entries while value is out.
+        let other = map.insert(99);
+        map.remove(&other);
+
+        assert!(map.restore(&key, value));
+        assert_eq!(map.get(&key), Some(&1));
+    }
 }
