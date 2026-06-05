@@ -591,9 +591,9 @@ mod tests {
     #[test]
     fn iter_yields_only_live_values() {
         let mut map = SparseMap::new();
-        map.insert(1);
+        let _ = map.insert(1);
         let key = map.insert(2);
-        map.insert(3);
+        let _ = map.insert(3);
         map.remove(&key);
 
         let mut values = map.iter().copied().collect::<Vec<_>>();
@@ -604,8 +604,8 @@ mod tests {
     #[test]
     fn iter_mut_allows_mutation() {
         let mut map = SparseMap::new();
-        map.insert(1);
-        map.insert(2);
+        let _ = map.insert(1);
+        let _ = map.insert(2);
 
         for value in map.iter_mut() {
             *value *= 10;
@@ -619,8 +619,8 @@ mod tests {
     #[test]
     fn drain_yields_all_and_empties() {
         let mut map = SparseMap::new();
-        map.insert(1);
-        map.insert(2);
+        let _ = map.insert(1);
+        let _ = map.insert(2);
 
         let mut drained = map.drain().collect::<Vec<_>>();
         drained.sort();
@@ -644,9 +644,9 @@ mod tests {
     #[test]
     fn drain_dropped_early_still_empties() {
         let mut map = SparseMap::new();
-        map.insert(1);
-        map.insert(2);
-        map.insert(3);
+        let _ = map.insert(1);
+        let _ = map.insert(2);
+        let _ = map.insert(3);
 
         {
             let mut drain = map.drain();
@@ -659,21 +659,18 @@ mod tests {
     #[test]
     fn clear_empties_and_invalidates_keys() {
         let mut map = SparseMap::new();
-        let k1 = map.insert(1);
-        let k2 = map.insert(2);
+        let key = map.insert(1);
 
         map.clear();
 
         assert!(map.is_empty());
-        assert_eq!(map.get(&k1), None);
-        assert_eq!(map.get(&k2), None);
+        assert_eq!(map.get(&key), None);
 
-        // Refill both freed slots; the one reusing k1's slot must
-        // carry a fresh generation so the stale key stays invalid.
-        map.insert(3);
+        // Reusing the previous slot must carry a fresh generation so
+        // the stale key stays invalid.
         let reused = map.insert(4);
-        assert_eq!(k1.index(), reused.index());
-        assert_ne!(k1.generation(), reused.generation());
-        assert_eq!(map.get(&k1), None);
+        assert_eq!(key.index(), reused.index());
+        assert_ne!(key.generation(), reused.generation());
+        assert_eq!(map.get(&key), None);
     }
 }
