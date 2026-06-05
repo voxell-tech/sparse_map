@@ -228,6 +228,88 @@ impl<T> SparseMap<T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Iterates shared references to every live value.
+    ///
+    /// Values are yielded in slot order, which is not guaranteed to
+    /// match insertion order once slots have been reused.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.buffer.iter().flatten()
+    }
+
+    /// Iterates mutable references to every live value.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.buffer.iter_mut().flatten()
+    }
+
+    /// Removes every live value and yields it by value, leaving the
+    /// map empty.
+    ///
+    /// Each drained slot is freed for reuse and its generation
+    /// bumped, so any outstanding [`Key`] is invalidated. Dropping
+    /// the returned iterator before it is exhausted still removes the
+    /// remaining values.
+    pub fn drain(&mut self) -> Drain<'_, T> {
+        Drain {
+            map: self,
+            index: 0,
+        }
+    }
+
+    /// Removes every live value, leaving the map empty.
+    ///
+    /// Like [`Self::drain`] but discards the values. Slots are freed
+    /// for reuse and the generation of each previously live slot
+    /// bumped, so any outstanding [`Key`] is invalidated.
+    pub fn clear(&mut self) {
+        for (index, slot) in self.buffer.iter_mut().enumerate() {
+            // Bump only occupied slots; empty ones hold no live key.
+            if slot.take().is_some() {
+                self.generations[index] =
+                    self.generations[index].wrapping_add(1);
+            }
+        }
+
+        // Every slot is now free.
+        self.empty_slots.clear();
+        self.empty_slots.extend(0..self.buffer.len());
+    }
+}
+
+/// Draining iterator for a [`SparseMap`], created by
+/// [`SparseMap::drain`].
+pub struct Drain<'a, T> {
+    map: &'a mut SparseMap<T>,
+    index: usize,
+}
+
+impl<T> Iterator for Drain<'_, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        while self.index < self.map.buffer.len() {
+            let index = self.index;
+            self.index += 1;
+
+            if self.map.buffer[index].is_some() {
+                // Free the slot and invalidate its key.
+                let generation =
+                    self.map.generations[index].wrapping_add(1);
+                self.map.generations[index] = generation;
+                self.map.empty_slots.push(index);
+                return self.map.buffer[index].take();
+            }
+        }
+
+        None
+    }
+}
+
+impl<T> Drop for Drain<'_, T> {
+    fn drop(&mut self) {
+        // Remove any values left when the iterator is dropped early.
+        for _ in self.by_ref() {}
+    }
 }
 
 impl<T> Default for SparseMap<T> {
@@ -504,5 +586,94 @@ mod tests {
 
         assert!(map.restore(&key, value));
         assert_eq!(map.get(&key), Some(&1));
+    }
+
+    #[test]
+    fn iter_yields_only_live_values() {
+        let mut map = SparseMap::new();
+        map.insert(1);
+        let key = map.insert(2);
+        map.insert(3);
+        map.remove(&key);
+
+        let mut values = map.iter().copied().collect::<Vec<_>>();
+        values.sort();
+        assert_eq!(values, [1, 3]);
+    }
+
+    #[test]
+    fn iter_mut_allows_mutation() {
+        let mut map = SparseMap::new();
+        map.insert(1);
+        map.insert(2);
+
+        for value in map.iter_mut() {
+            *value *= 10;
+        }
+
+        let mut values = map.iter().copied().collect::<Vec<_>>();
+        values.sort();
+        assert_eq!(values, [10, 20]);
+    }
+
+    #[test]
+    fn drain_yields_all_and_empties() {
+        let mut map = SparseMap::new();
+        map.insert(1);
+        map.insert(2);
+
+        let mut drained = map.drain().collect::<Vec<_>>();
+        drained.sort();
+        assert_eq!(drained, [1, 2]);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn drain_invalidates_keys_and_reuses_slots() {
+        let mut map = SparseMap::new();
+        let k1 = map.insert(1);
+        map.drain().count();
+
+        assert_eq!(map.get(&k1), None);
+
+        let k2 = map.insert(2);
+        assert_eq!(k1.index(), k2.index());
+        assert_ne!(k1.generation(), k2.generation());
+    }
+
+    #[test]
+    fn drain_dropped_early_still_empties() {
+        let mut map = SparseMap::new();
+        map.insert(1);
+        map.insert(2);
+        map.insert(3);
+
+        {
+            let mut drain = map.drain();
+            let _ = drain.next();
+        }
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn clear_empties_and_invalidates_keys() {
+        let mut map = SparseMap::new();
+        let k1 = map.insert(1);
+        let k2 = map.insert(2);
+
+        map.clear();
+
+        assert!(map.is_empty());
+        assert_eq!(map.get(&k1), None);
+        assert_eq!(map.get(&k2), None);
+
+        // Refill both freed slots; the one reusing k1's slot must
+        // carry a fresh generation so the stale key stays invalid.
+        map.insert(3);
+        let reused = map.insert(4);
+        assert_eq!(k1.index(), reused.index());
+        assert_ne!(k1.generation(), reused.generation());
+        assert_eq!(map.get(&k1), None);
     }
 }
