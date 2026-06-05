@@ -195,6 +195,11 @@ impl<T> SparseMap<T> {
     where
         F: FnOnce(&mut Self, &mut T) -> R,
     {
+        let generation = self.generations.get(key.index)?;
+        if *generation != key.generation {
+            return None;
+        }
+
         let mut value = self.buffer[key.index].take()?;
         let result = f(self, &mut value);
         self.buffer[key.index] = Some(value);
