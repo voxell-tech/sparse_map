@@ -10,3 +10,10 @@ repository = "https://github.com/voxell-tech/sparse_map"
 readme = "README.md"
 
 [dependencies]
+serde = { version = "1", default-features = false, features = [
+    "derive",
+    "alloc",
+], optional = true }
+
+[features]
+serde = ["dep:serde"]

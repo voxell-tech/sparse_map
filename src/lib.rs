@@ -19,10 +19,26 @@ use alloc::vec::Vec;
 /// - Removal is **O(1)**.
 /// - Lookup is **O(1)**.
 /// - Keys are invalidated once their value is removed.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct SparseMap<T> {
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
     buffer: Vec<Option<T>>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
     generations: Vec<u32>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
     empty_slots: Vec<usize>,
 }
 
@@ -338,6 +354,10 @@ impl<T> Default for SparseMap<T> {
 /// Any previously issued `Key` for that slot becomes invalid.
 #[derive(
     Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct Key {
     index: usize,
