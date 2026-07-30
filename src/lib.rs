@@ -375,12 +375,34 @@ impl Key {
         Self { index, generation }
     }
 
+    /// Builds a `Key` directly from its raw `index`/`generation`
+    /// parts, bypassing whatever map would normally hand one out.
+    ///
+    /// # Warning
+    ///
+    /// Nothing checks that this key corresponds to a live (or even
+    /// ever-inserted) slot in any particular map - a mismatched key
+    /// just reads back as absent rather than panicking, so it's easy
+    /// to end up with one that silently never matches what you
+    /// intended. Only use this to reconstruct a key you already know
+    /// is valid for a specific map (e.g. rebuilding one after
+    /// deserializing, where the generation is known ahead of time).
+    pub fn from_raw(index: usize, generation: u32) -> Self {
+        Self { index, generation }
+    }
+
     pub fn index(&self) -> usize {
         self.index
     }
 
     pub fn generation(&self) -> u32 {
         self.generation
+    }
+
+    /// Splits this key back into its raw `(index, generation)` parts
+    /// - the inverse of [`Self::from_raw`].
+    pub fn into_raw(self) -> (usize, u32) {
+        (self.index, self.generation)
     }
 }
 
