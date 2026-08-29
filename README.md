@@ -1,10 +1,10 @@
 # Sparse Map
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/voxell-tech/sparse_map#license)
+[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/nixonyh/sparse_map#license)
 [![Crates.io](https://img.shields.io/crates/v/sparse_map.svg)](https://crates.io/crates/sparse_map)
 [![Downloads](https://img.shields.io/crates/d/sparse_map.svg)](https://crates.io/crates/sparse_map)
 [![Docs](https://docs.rs/sparse_map/badge.svg)](https://docs.rs/sparse_map/latest/sparse_map/)
-[![CI](https://github.com/voxell-tech/sparse_map/workflows/CI/badge.svg)](https://github.com/voxell-tech/sparse_map/actions)
+[![CI](https://github.com/nixonyh/sparse_map/workflows/CI/badge.svg)](https://github.com/nixonyh/sparse_map/actions)
 [![Discord](https://img.shields.io/discord/442334985471655946.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/Mhnyp6VYEQ)
 
 A sparse map with stable generational keys. It is designed for
