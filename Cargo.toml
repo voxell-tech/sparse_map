@@ -1,12 +1,12 @@
 [package]
 name = "sparse_map"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A sparse map with stable generational keys."
 keywords = ["sparse", "map", "generation", "index"]
 categories = ["data-structures", "no-std"]
-repository = "https://github.com/voxell-tech/sparse_map"
+repository = "https://github.com/nixonyh/sparse_map"
 readme = "README.md"
 
 [dependencies]
